@@ -6,50 +6,30 @@ import osc_library as osc
 GPIO.setmode(GPIO.BOARD)  # Use BOARD pin numbering (physical pins)
 GPIO.setup(8, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set pin 8 as an input
 
-double_click_time = 0.6  # Max time between clicks to be considered a double-click
-single_click_timeout = 0.4  # Time to wait before confirming a single click
-last_click_time = 0
-click_count = 0
-button_pressed = False
+PRESS_UNTIL_TOGGLE = 1
 
 # OSC
-osc_client = osc.OSCClient(namespace="/yosc:req/", ip="192.168.1.201", port=49900)
+osc_client = osc.OSCClient(namespace="/yosc:req/", ip="192.168.1.200", port=49900)
 osc_client.set_osc_address("MIXER:Current/Fx/Fader/On")
 
 
 try:
     while True:
-        # Read the value of pin 8 (button state)
-        value = GPIO.input(8)
+        if GPIO.input(8) == GPIO.HIGH:  # Check if the button is pressed
+            start_time = time.time()  # Record the time when button is pressed
+            while GPIO.input(8) == GPIO.HIGH:  # Wait until the button is released
+                pass
+            press_duration = time.time() - start_time  # Calculate how long the button was pressed
 
-        if value == 0 and not button_pressed:  # Button press detected (transition from released to pressed)
-            button_pressed = True  # Mark that the button is now pressed
-            current_time = time.time()
-
-            if click_count == 0:  # First press
-                click_count = 1
-                last_click_time = current_time
-                print("First click detected, waiting for release...")
-
-            elif click_count == 1 and (current_time - last_click_time) < double_click_time:  # Second press within time limit
-                print("ON (Double-click detected)")
-                osc_client.multi_message_set(fx_channels=[1, 2], state=1)
-                click_count = 0  # Reset after detecting a double-click
-                button_pressed = False
-
-        if value == 1 and button_pressed:  # Button release detected (transition from pressed to released)
-            button_pressed = False  # Mark that the button is now released
-
-            # Check for single click after release if no second click occurs in time
-            if click_count == 1 and (time.time() - last_click_time) >= single_click_timeout:
-                print("OFF (Single-click detected)")
+            if press_duration < PRESS_UNTIL_TOGGLE:
+                print("off")  # Button pressed for less than 1 second
                 osc_client.multi_message_set(fx_channels=[1, 2], state=0)
-                click_count = 0  # Reset after confirming a single-click
+            else:
+                print("on")  # Button pressed for more than 1 second
+                osc_client.multi_message_set(fx_channels=[1, 2], state=1)
 
-        time.sleep(0.05)  # Small delay to prevent high CPU usage
+        time.sleep(0.1)  # Add a small delay to avoid CPU overload
 
 except KeyboardInterrupt:
-    print("Program stopped by user")
+    GPIO.cleanup()  # Clean up GPIO when program is terminated
 
-finally:
-    GPIO.cleanup()  # Clean up GPIO settings when the program exits
