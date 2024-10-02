@@ -1,95 +1,53 @@
-import argparse
-# # import random
-# import time
-from pythonosc import udp_client
+import RPi.GPIO as GPIO
+import time
+import osc_library as osc
 
-# from machine import Pin
-# import network
+# Set up GPIO mode and pin
+GPIO.setmode(GPIO.BOARD)  # Use BOARD pin numbering (physical pins)
+GPIO.setup(8, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set pin 8 as an input
 
-#
-# class InGPIOPort:
-#
-#     def __init__(self, port):
-#         self.pin = Pin(port, Pin.IN, Pin.PULL_UP)
-#
-#     def wait_for_signal(self, _callback):
-#         while self.pin.value() != 1:
-#             pass
-#         print("hello")
-#
-#
-# class OutGPIOPort:
-#
-#     def __init__(self, port):
-#         self.pin = Pin(port, Pin.OUT)
-#         self.isBlinking = False
-#
-#     def send_signal_times(self, count, sleep=0.2):
-#         for i in range(count):
-#             self.pin.value(1)
-#             time.sleep(sleep)
-#             self.pin.value(0)
-#             time.sleep(sleep)
-#
-#     def on(self):
-#         self.pin.value(1)
-#
-#     def off(self):
-#         self.pin.value(0)
+double_click_time = 0.3  # Max time between clicks to be considered a double-click
+single_click_timeout = 0.4  # Time to wait before confirming a single click
+last_click_time = 0
+click_count = 0
 
-class OSCClient:
+# OSC
+osc_client = osc.OSCClient(namespace="/yosc:req/", ip="192.168.1.201", port=49900)
+osc_client.set_osc_address("MIXER:Current/Fx/Fader/On")
 
-    def __init__(self, ip: str = "127.0.0.1", port: int = 5005):
-        self.ip = ip
-        self.port = port
-        
+try:
+    while True:
+        # Read the value of pin 8 (button state)
+        value = GPIO.input(8)
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--ip", default=ip, help="IP address of OSC server")
-        parser.add_argument("--port", default=port, type=int, help="Port of OSC server")
-        args = parser.parse_args()
+        if value == 0:  # Button press detected
+            current_time = time.time()
 
-        self.client = udp_client.SimpleUDPClient(args.ip, args.port)
+            # If first click
+            if click_count == 0:
+                click_count = 1
+                last_click_time = current_time
+                print("First click detected, waiting for second click...")
 
-    def send_message(self, address: str, message: str):
-        self.client.send_message(address, message)
+            # If second click happens within the double-click time
+            elif click_count == 1 and (current_time - last_click_time) < double_click_time:
+                print("ON (Double-click detected)")
+                osc_client.multi_message_set(fx_channels=[1, 2], state=1)
+                click_count = 0  # Reset after detecting a double-click
 
+            # Debounce the button
+            time.sleep(0.2)
 
+        # Check if it's a single-click after the timeout
+        if click_count == 1 and (time.time() - last_click_time) >= single_click_timeout:
+            print("OFF (Single-click detected)")
+            osc_client.multi_message_set(fx_channels=[1, 2], state=0)
+            click_count = 0  # Reset after confirming a single-click
 
-# def connect_wifi():
-#     wlan = network.WLAN(network.STA_IF)
-#     wlan.active(True)
-#     wlan.connect(ssid, password)
-#     while wlan.isconnected() == False:
-#         print('Waiting for connection...')
-#         time.sleep(1)
-#     print(wlan.ifconfig())
+        time.sleep(0.05)  # Small delay to prevent high CPU usage
 
+except KeyboardInterrupt:
+    print("Program stopped by user")
 
-if __name__ == '__main__':
-    # onboardled = OutGPIOPort(18)
-    #
-    # try:
-    #     onboardled.send_signal_times(3)
-    #
-    #     ssid = 'ILikeToes'
-    #     password = 'Jesus7712!xy'
-    #
-    #     # Indicate Connection
-    #     connect_wifi()
-    #     onboardled.on()
-    #
-    #
-    # except Exception as e:
-    #     onboardled.off()
-
-    oscclient = OSCClient("192.168.0.2", 49900)
-
-    oscclient.send_message(address="/ip", message="Hello World")
-
-
-    # portIn = InGPIOPort(14)
-    #
-    # portIn.wait_for_signal(lambda: print("Detected"))
-
-    # client.send_message("/filter", random.random())
+finally:
+    GPIO.cleanup()  # Clean up GPIO settings when the program exits
